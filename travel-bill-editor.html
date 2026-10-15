@@ -189,10 +189,14 @@
         <label>Kms<input data-k="kms" type="number" step="any" value="343"></label>
         <label>Rate / Km<input data-k="rate" type="number" step="any" value="13"></label>
         <label>Trip amount (auto)<input id="tripAmt" readonly></label>
-        <label>Total Kms of local trip<input data-k="localKms" value=""></label>
+        <label>Total Kms of local trip<input data-k="localKms" type="number" min="0" step="any" value=""></label>
         <label>Fixed fare (80 Kms &amp; 8 Hrs)<input data-k="fixed" type="number" step="any" value=""></label>
-        <label>Extra Kms charges<input data-k="exKm" type="number" step="any" value=""></label>
-        <label>Extra Hours charges<input data-k="exHr" type="number" step="any" value=""></label>
+        <label>Extra Kms above 80 (auto)<input id="extraKms" readonly></label>
+        <label>Extra Kms charges (auto)<input data-k="exKm" readonly></label>
+        <label>Extra Hours above 8<input data-k="extraHours" type="number" min="0" step="any" value=""></label>
+        <label>Rate / Extra Hour<input data-k="hourRate" type="number" min="0" step="any" value=""></label>
+        <label>Extra Hours charges (auto)<input data-k="exHr" readonly></label>
+        <p class="full" style="margin: 0; color: var(--mu); font-size: 13px">For local trips, enter the total local kilometres and fixed fare. The fare includes 80 km and 8 hours. Extra kilometres use Rate / Km; enter only hours beyond the included 8 hours. Local fares replace the Kms × Rate / Km trip amount.</p>
         <label>Toll charges<input data-k="toll" type="number" step="any" value="640"></label>
         <label>Parking charges<input data-k="park" type="number" step="any" value=""></label>
         <label>Night halt<input data-k="night" type="number" step="any" value=""></label>
@@ -223,15 +227,23 @@
     function n(k) { var x = parseFloat(v(k)); return isNaN(x) ? 0 : x }
     function inr(x) { return Number(x).toLocaleString('en-IN', { maximumFractionDigits: 2 }) }
     function calc() {
-      var trip = Math.round(n('kms') * n('rate') * 100) / 100;
-      var total = trip + n('fixed') + n('exKm') + n('exHr') + n('toll') + n('park') + n('night');
+      var local = v('localKms') !== '' || n('fixed') > 0;
+      var extraKms = local ? Math.max(0, n('localKms') - 80) : 0;
+      var extraHours = local ? Math.max(0, n('extraHours')) : 0;
+      var exKm = Math.round(extraKms * Math.max(0, n('rate')) * 100) / 100;
+      var exHr = Math.round(extraHours * Math.max(0, n('hourRate')) * 100) / 100;
+      var trip = local ? 0 : Math.round(n('kms') * n('rate') * 100) / 100;
+      var total = Math.round((trip + n('fixed') + exKm + exHr + n('toll') + n('park') + n('night')) * 100) / 100;
       var cg = Math.round(total * n('cg')) / 100, sg = Math.round(total * n('sg')) / 100;
-      var net = total + cg + sg - n('adv');
-      return { trip: trip, total: total, cg: cg, sg: sg, net: net };
+      var net = Math.round((total + cg + sg - n('adv')) * 100) / 100;
+      return { local: local, extraKms: extraKms, extraHours: extraHours, exKm: exKm, exHr: exHr, trip: trip, total: total, cg: cg, sg: sg, net: net };
     }
     function refresh() {
       var c = calc();
       document.getElementById('tripAmt').value = inr(c.trip);
+      document.getElementById('extraKms').value = inr(c.extraKms);
+      document.querySelector('[data-k="exKm"]').value = c.exKm.toFixed(2);
+      document.querySelector('[data-k="exHr"]').value = c.exHr.toFixed(2);
       document.getElementById('tBill').textContent = 'Rs. ' + inr(c.total);
       document.getElementById('tNet').textContent = 'Rs. ' + inr(c.net);
       try { var o = {}; els.forEach(function (e) { o[e.dataset.k] = e.value }); localStorage.setItem(KEY, JSON.stringify(o)) } catch (e) { }
@@ -246,6 +258,8 @@
       var J = window.jspdf.jsPDF, d = new J({ unit: 'mm', format: 'a4' }), c = calc();
       var L = 12, R = 198, W = R - L, y = 14;
       d.setDrawColor(0); d.setLineWidth(.3);
+      // Frame the entire A4 bill, including letterhead and signature, inside print margins.
+      d.rect(7, 7, 196, 283);
       d.setFont('helvetica', 'bold'); d.setFontSize(18); d.text(v('co'), 105, y, { align: 'center' });
       d.setFont('helvetica', 'normal'); d.setFontSize(9);
       d.text(v('coAdd'), 105, y + 6, { align: 'center' });
@@ -266,7 +280,7 @@
       // table header
       var cx = [L, 98, 122, 146, R];
       d.setFont('helvetica', 'bold');
-      d.text('Description', L + 2, y + 6); d.text('Kms/Hrs', cx[1] + 2, y + 6); d.text('Rate/Km', cx[2] + 2, y + 6); d.text('Amount (Rs.)', R - 2, y + 6, { align: 'right' });
+      d.text('Description', L + 2, y + 6); d.text('Kms/Hrs', cx[1] + 2, y + 6); d.text('Rate', cx[2] + 2, y + 6); d.text('Amount (Rs.)', R - 2, y + 6, { align: 'right' });
       y += 9; d.line(L, y, R, y);
       var top = y;
       d.setFont('helvetica', 'normal');
@@ -274,17 +288,17 @@
       d.setFont('helvetica', 'bold'); d.text('Trip Details : ' + v('type'), L + 2, ty);
       d.text(v('route'), L + 2, ty + 6); d.text(v('vno'), L + 2, ty + 12);
       d.text('dated ' + v('tdate'), L + 2, ty + 18);
-      d.setFont('helvetica', 'normal'); d.text(v('kms'), cx[1] + 2, ty + 18); d.text(v('rate'), cx[2] + 2, ty + 18); d.text(inr(c.trip), R - 2, ty + 18, { align: 'right' });
+      d.setFont('helvetica', 'normal'); d.text(c.local ? '-' : v('kms'), cx[1] + 2, ty + 18); d.text(c.local ? '-' : v('rate'), cx[2] + 2, ty + 18); d.text(c.local ? '-' : inr(c.trip), R - 2, ty + 18, { align: 'right' });
       var lines = [
         ['Total Kms Of Local Trip', v('localKms') || '-', ''],
         ['Fixed Fare for 80 Kms & 8 Hrs', '', dash(n('fixed'))],
-        ['Add : Extra Kms Charges', '', dash(n('exKm'))],
-        ['Add : Extra Hours Charges', '', dash(n('exHr'))],
+        ['Add : Extra Kms Charges', dash(c.extraKms), dash(c.exKm), c.extraKms ? inr(n('rate')) : '-'],
+        ['Add : Extra Hours Charges', dash(c.extraHours), dash(c.exHr), c.extraHours ? inr(n('hourRate')) : '-'],
         ['Add: Toll Charges', '', dash(n('toll'))],
         ['Add: Parking Charges', '', dash(n('park'))],
         ['Add: Night Halt', '', dash(n('night'))]];
       var ly = ty + 30;
-      lines.forEach(function (r, i) { var yy = ly + i * 7; d.setFont('helvetica', 'bold'); d.text(r[0], L + 2, yy); d.setFont('helvetica', 'normal'); if (r[1]) d.text(String(r[1]), cx[1] + 2, yy); if (r[2]) d.text(r[2], R - 2, yy, { align: 'right' }) });
+      lines.forEach(function (r, i) { var yy = ly + i * 7; d.setFont('helvetica', 'bold'); d.text(r[0], L + 2, yy); d.setFont('helvetica', 'normal'); if (r[1]) d.text(String(r[1]), cx[1] + 2, yy); if (r[2]) d.text(r[2], R - 2, yy, { align: 'right' }); if (r[3]) d.text(r[3], cx[2] + 2, yy) });
       y = ly + 7 * lines.length - 2;
       d.line(L, y, R, y);
       var sum = [['Total Bill Amount', inr(c.total), 1], ['Add:- CGST' + (n('cg') ? ' @' + n('cg') + '%' : ''), dash(c.cg)], ['Add:- SGST' + (n('sg') ? ' @' + n('sg') + '%' : ''), dash(c.sg)], ['TOTAL GST', dash(c.cg + c.sg)], ['(Less) Advance Received', dash(n('adv'))], ['Net Amount Payable', inr(c.net), 1]];
